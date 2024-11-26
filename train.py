@@ -13,8 +13,9 @@ from torch.utils.data import DataLoader
 import evaluate
 from tqdm import tqdm
 from PIL import Image
-
-
+from typing import Literal
+from models.FPNEfficientNet import FPNEfficientNetV2_S
+from models.FPNMobileNet import FPNMobileNetV3Large
 
 def validate(model, dataloader, best_scores, epoch, device, model_name):
     model.eval()
@@ -24,15 +25,23 @@ def validate(model, dataloader, best_scores, epoch, device, model_name):
             for images, masks, class_labels, _ in tepoch:
                 images = images.to(device)
                 masks = masks.to(device)
+            
                 if model_name == "mask2former_swin":
                     class_labels = class_labels.to(device)
                     outputs = model(pixel_values=images, mask_labels=masks, class_labels=class_labels)
                     predicted = torch.stack(preprocessor.post_process_semantic_segmentation(outputs, target_sizes=[(512, 512) for i in range(masks.shape[0])]))
                     masks = masks.argmax(dim=1)
-                else:
+                elif model_name == "segformer_mit":
                     outputs = model(pixel_values=images, labels=masks)
                     upsampled_logits = nn.functional.interpolate(outputs.logits, size=masks.shape[-2:], mode="bilinear", align_corners=False)
-                    predicted = upsampled_logits.argmax(dim=1)                    
+                    predicted = upsampled_logits.argmax(dim=1)
+                elif model_name == "fpn_efficientnet" or "fpn_mobilenet":
+                    outputs = model(images)
+                    upsampled_logits = nn.functional.interpolate(outputs, size=masks.shape[-2:], mode="bilinear", align_corners=False)
+                    loss = criterion(upsampled_logits, masks.long())
+                    predicted = upsampled_logits.argmax(dim=1)
+                else:
+                    assert False
 
                 metric.add_batch(predictions=predicted.detach().cpu().numpy(), references=masks.detach().cpu().numpy())
             metrics = metric._compute(
@@ -49,14 +58,14 @@ def validate(model, dataloader, best_scores, epoch, device, model_name):
                     best_scores[score]["epoch"] = epoch
                     print("---NEW BEST---")
                 print(f"Mean_{score}: {metrics[f'mean_{score}']} (best: {best_scores[score]})")
- 
+
 
 
 if __name__ == '__main__':
 
     # Create datasets and dataloaders
     base_folder = r"bcss_sample"
-    model_name = "segformer_mit"
+    model_name: Literal["segformer_mit", "mask2former_swin", "fpn_efficientnet", "fpn_mobilenet"] = "fpn_mobilenet"
     num_classes = 22
     num_epochs = 5
     bs = 16
@@ -97,8 +106,13 @@ if __name__ == '__main__':
         model = Mask2FormerForUniversalSegmentation.from_pretrained("facebook/mask2former-swin-tiny-ade-semantic", id2label=id2label, ignore_mismatched_sizes=True).to(device)
     elif model_name == "segformer_mit":
         model = SegformerForSemanticSegmentation.from_pretrained("nvidia/mit-b0", num_labels=num_classes).to(device)
+    elif model_name == "fpn_efficientnet":
+        model = FPNEfficientNetV2_S(num_classes=num_classes).cuda()
+    elif model_name == "fpn_mobilenet":
+        model = FPNMobileNetV3Large(num_classes=num_classes).cuda()
     else:
         assert False
+
     preprocessor = MaskFormerImageProcessor(ignore_index=0, reduce_labels=False, do_resize=False, do_rescale=False, do_normalize=False)
 
     model.train()
@@ -109,10 +123,12 @@ if __name__ == '__main__':
     best_scores = {"iou": {"epoch": -1, "score": -1},
                    "accuracy": {"epoch": -1, "score": -1}}
 
+    criterion = torch.nn.CrossEntropyLoss()
+
     for epoch in range(num_epochs):
         print("Epoch:", epoch + 1)
         with tqdm(train_dataloader, unit="batch") as tepoch:
-            model.eval()
+            model.train()
             for images, masks, class_labels, _ in tepoch:
                 optimizer.zero_grad()
                 # get the inputs
@@ -123,12 +139,20 @@ if __name__ == '__main__':
                     outputs = model(pixel_values=images, mask_labels=masks, class_labels=class_labels)
                     predicted = torch.stack(preprocessor.post_process_semantic_segmentation(outputs, target_sizes=[(512, 512) for i in range(masks.shape[0])]))
                     masks = masks.argmax(dim=1)
-                else:
+                    loss = outputs.loss
+                elif model_name == "segformer_mit":
                     outputs = model(pixel_values=images, labels=masks)
                     upsampled_logits = nn.functional.interpolate(outputs.logits, size=masks.shape[-2:], mode="bilinear", align_corners=False)
                     predicted = upsampled_logits.argmax(dim=1)
+                    loss = outputs.loss
+                elif model_name == "fpn_efficientnet" or "fpn_mobilenet":
+                    outputs = model(images)
+                    upsampled_logits = nn.functional.interpolate(outputs, size=masks.shape[-2:], mode="bilinear", align_corners=False)
+                    loss = criterion(upsampled_logits, masks.long())
+                    predicted = upsampled_logits.argmax(dim=1)
+                else:
+                    assert False
 
-                loss = outputs.loss
                 loss.backward()
                 optimizer.step()
 
