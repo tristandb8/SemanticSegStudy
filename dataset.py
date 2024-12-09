@@ -12,12 +12,12 @@ import torch.nn.functional as F
 import numpy as np
 
 class SegmentationDataset(Dataset):
-    def __init__(self, image_dir, mask_dir, model_name, transform=None, augment=False):
+    def __init__(self, image_dir, mask_dir, one_hot, transform=None, augment=False):
         self.image_dir = image_dir
         self.mask_dir = mask_dir
         self.transform = transform
         self.augment = augment
-        self.model_name = model_name
+        self.one_hot = one_hot
         self.images = os.listdir(image_dir)
 
     def __len__(self):
@@ -41,7 +41,7 @@ class SegmentationDataset(Dataset):
         class_labels = torch.zeros(22, dtype=torch.long)
         class_labels[unique_classes] = 1
 
-        if self.model_name == "mask2former_swin":
+        if self.one_hot:
             mask = F.one_hot(mask.long(), num_classes=22)
             mask = mask.permute(2, 0, 1).float()
 

@@ -1,9 +1,4 @@
 from transformers import SegformerForSemanticSegmentation, Mask2FormerForUniversalSegmentation, MaskFormerImageProcessor
-import glob
-import matplotlib.pyplot as plt
-import numpy as np
-import random
-import shutil
 import os
 import torch
 from torch import nn
@@ -12,12 +7,10 @@ from dataset import SegmentationDataset
 from torch.utils.data import DataLoader
 import evaluate
 from tqdm import tqdm
-from PIL import Image
 from typing import Literal
-from models.FPNEfficientNet import FPNEfficientNetV2_S
-from models.FPNMobileNet import FPNMobileNetV3Large
+from models.CustomModels import CustomModel
 
-def validate(model, dataloader, best_scores, epoch, device, model_name):
+def validate(model, dataloader, best_scores, epoch, device, architecture):
     model.eval()
     metric = evaluate.load("mean_iou")
     with torch.no_grad():
@@ -26,22 +19,20 @@ def validate(model, dataloader, best_scores, epoch, device, model_name):
                 images = images.to(device)
                 masks = masks.to(device)
             
-                if model_name == "mask2former_swin":
+                if architecture == "mask2former":
                     class_labels = class_labels.to(device)
                     outputs = model(pixel_values=images, mask_labels=masks, class_labels=class_labels)
                     predicted = torch.stack(preprocessor.post_process_semantic_segmentation(outputs, target_sizes=[(512, 512) for i in range(masks.shape[0])]))
                     masks = masks.argmax(dim=1)
-                elif model_name == "segformer_mit":
+                elif architecture == "segformer":
                     outputs = model(pixel_values=images, labels=masks)
                     upsampled_logits = nn.functional.interpolate(outputs.logits, size=masks.shape[-2:], mode="bilinear", align_corners=False)
                     predicted = upsampled_logits.argmax(dim=1)
-                elif model_name == "fpn_efficientnet" or "fpn_mobilenet":
+                else:
                     outputs = model(images)
                     upsampled_logits = nn.functional.interpolate(outputs, size=masks.shape[-2:], mode="bilinear", align_corners=False)
-                    loss = criterion(upsampled_logits, masks.long())
                     predicted = upsampled_logits.argmax(dim=1)
-                else:
-                    assert False
+
 
                 metric.add_batch(predictions=predicted.detach().cpu().numpy(), references=masks.detach().cpu().numpy())
             metrics = metric._compute(
@@ -65,14 +56,19 @@ if __name__ == '__main__':
 
     # Create datasets and dataloaders
     base_folder = r"bcss_sample"
-    model_name: Literal["segformer_mit", "mask2former_swin", "fpn_efficientnet", "fpn_mobilenet"] = "fpn_mobilenet"
+    encoder: Literal["resnet34",
+                     "mobilenetv3_large_100",
+                     "mobilenetv4_conv_small.e2400_r224_in1k",
+                     "mobilenetv4_hybrid_medium.ix_e550_r384_in1k",
+                     "efficientnet_b0",
+                     "rexnetr_200.sw_in12k_ft_in1k",
+                     "maxvit_base_tf_512.in21k_ft_in1k"] = "mobilenetv4_conv_small.e2400_r224_in1k"
     num_classes = 22
     num_epochs = 5
-    bs = 16
-    
-    id2label = {0:"background"}
-    for i in range(1, 22):
-        id2label[i] = "class_" + str(i)
+    bs = 4
+    patience = 2
+    lr_factor = 0.2
+    one_hot_masks = False
 
     # Set up data transforms
     transform = transforms.Compose([
@@ -88,91 +84,108 @@ if __name__ == '__main__':
 
     train_dataset = SegmentationDataset(train_image_dir,
                                         train_mask_dir,
-                                        model_name,
+                                        one_hot=one_hot_masks,
                                         transform=transform,
                                         augment=True)
     val_dataset = SegmentationDataset(val_image_dir,
                                       val_mask_dir,
-                                      model_name,
+                                      one_hot=one_hot_masks,
                                       transform=transform,
                                       augment=False)
 
-    train_dataloader = DataLoader(train_dataset, batch_size=bs, shuffle=True, num_workers=4)
-    val_dataloader = DataLoader(val_dataset, batch_size=bs, shuffle=False, num_workers=4)
+    train_dataloader = DataLoader(train_dataset, batch_size=bs, shuffle=True, num_workers=1)
+    val_dataloader = DataLoader(val_dataset, batch_size=bs, shuffle=False, num_workers=1)
 
-    # Initialize the model, loss function, and optimizer
-    device = torch.device("cuda")
-    if model_name == "mask2former_swin":
-        model = Mask2FormerForUniversalSegmentation.from_pretrained("facebook/mask2former-swin-tiny-ade-semantic", id2label=id2label, ignore_mismatched_sizes=True).to(device)
-    elif model_name == "segformer_mit":
-        model = SegformerForSemanticSegmentation.from_pretrained("nvidia/mit-b0", num_labels=num_classes).to(device)
-    elif model_name == "fpn_efficientnet":
-        model = FPNEfficientNetV2_S(num_classes=num_classes).cuda()
-    elif model_name == "fpn_mobilenet":
-        model = FPNMobileNetV3Large(num_classes=num_classes).cuda()
-    else:
-        assert False
+    for architecture in ["FPN, ""Unet"]:
+        # Initialize the model, loss function, and optimizer
+        device = torch.device("cuda")
+        if architecture == "mask2former":
+            assert one_hot_masks
+            id2label = {0:"background"}
+            for i in range(1, 22):
+                id2label[i] = "class_" + str(i)
+            preprocessor = MaskFormerImageProcessor(ignore_index=0, reduce_labels=False, do_resize=False, do_rescale=False, do_normalize=False)
+            model = Mask2FormerForUniversalSegmentation.from_pretrained("facebook/mask2former-swin-tiny-ade-semantic", id2label=id2label, ignore_mismatched_sizes=True).to(device)
+        elif architecture == "segformer":
+            model = SegformerForSemanticSegmentation.from_pretrained("nvidia/mit-b0", num_labels=num_classes).to(device)
+        else:
+            model = CustomModel(num_classes=22, backbone=encoder, decoder=architecture).to(device)
+        
+        print("_____TEST______")
+        x = torch.randn(4, 3, 512, 512).to(device)
+        print(f"Input shape: {x.shape}")
+        output = model(x)
+        print(f"Output shape: {output.shape}")
+        print("_______________")
 
-    preprocessor = MaskFormerImageProcessor(ignore_index=0, reduce_labels=False, do_resize=False, do_rescale=False, do_normalize=False)
+        model.train()
 
-    model.train()
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+        metric = evaluate.load("mean_iou")
+        best_scores = {"iou": {"epoch": -1, "score": -1}, "accuracy": {"epoch": -1, "score": -1}}
 
-    metric = evaluate.load("mean_iou")
-    best_scores = {"iou": {"epoch": -1, "score": -1},
-                   "accuracy": {"epoch": -1, "score": -1}}
+        criterion = torch.nn.CrossEntropyLoss()
 
-    criterion = torch.nn.CrossEntropyLoss()
+        for epoch in range(num_epochs):
+            print("Epoch:", epoch + 1)
+            with tqdm(train_dataloader, unit="batch") as tepoch:
+                model.train()
+                for images, masks, class_labels, _ in tepoch:
+                    optimizer.zero_grad()
+                    # get the inputs
+                    images = images.to(device)
+                    masks = masks.to(device)
+                    if architecture == "mask2former":
+                        class_labels = class_labels.to(device)
+                        outputs = model(pixel_values=images, mask_labels=masks, class_labels=class_labels)
+                        predicted = torch.stack(preprocessor.post_process_semantic_segmentation(outputs, target_sizes=[(512, 512) for i in range(masks.shape[0])]))
+                        masks = masks.argmax(dim=1)
+                        loss = outputs.loss
+                    elif architecture == "segformer":
+                        outputs = model(pixel_values=images, labels=masks)
+                        upsampled_logits = nn.functional.interpolate(outputs.logits, size=masks.shape[-2:], mode="bilinear", align_corners=False)
+                        predicted = upsampled_logits.argmax(dim=1)
+                        loss = outputs.loss
+                    else:
+                        outputs = model(images)
+                        upsampled_logits = nn.functional.interpolate(outputs, size=masks.shape[-2:], mode="bilinear", align_corners=False)
+                        loss = criterion(upsampled_logits, masks.long())
+                        predicted = upsampled_logits.argmax(dim=1)
 
-    for epoch in range(num_epochs):
-        print("Epoch:", epoch + 1)
-        with tqdm(train_dataloader, unit="batch") as tepoch:
-            model.train()
-            for images, masks, class_labels, _ in tepoch:
-                optimizer.zero_grad()
-                # get the inputs
-                images = images.to(device)
-                masks = masks.to(device)
-                if model_name == "mask2former_swin":
-                    class_labels = class_labels.to(device)
-                    outputs = model(pixel_values=images, mask_labels=masks, class_labels=class_labels)
-                    predicted = torch.stack(preprocessor.post_process_semantic_segmentation(outputs, target_sizes=[(512, 512) for i in range(masks.shape[0])]))
-                    masks = masks.argmax(dim=1)
-                    loss = outputs.loss
-                elif model_name == "segformer_mit":
-                    outputs = model(pixel_values=images, labels=masks)
-                    upsampled_logits = nn.functional.interpolate(outputs.logits, size=masks.shape[-2:], mode="bilinear", align_corners=False)
-                    predicted = upsampled_logits.argmax(dim=1)
-                    loss = outputs.loss
-                elif model_name == "fpn_efficientnet" or "fpn_mobilenet":
-                    outputs = model(images)
-                    upsampled_logits = nn.functional.interpolate(outputs, size=masks.shape[-2:], mode="bilinear", align_corners=False)
-                    loss = criterion(upsampled_logits, masks.long())
-                    predicted = upsampled_logits.argmax(dim=1)
-                else:
-                    assert False
+                    loss.backward()
+                    optimizer.step()
 
-                loss.backward()
-                optimizer.step()
+                    # evaluate
+                    with torch.no_grad():
+                        metric.add_batch(predictions=predicted.detach().cpu().numpy(), references=masks.detach().cpu().numpy())
 
-                # evaluate
-                with torch.no_grad():
-                    metric.add_batch(predictions=predicted.detach().cpu().numpy(), references=masks.detach().cpu().numpy())
+                # currently using _compute instead of compute
+                # see this issue for more info: https://github.com/huggingface/evaluate/pull/328#issuecomment-1286866576
+                metrics = metric._compute(
+                        predictions=predicted.cpu(),
+                        references=masks.cpu(),
+                        num_labels=num_classes,
+                        ignore_index=255,
+                        reduce_labels=False, # we've already reduced the labels ourselves
+                    )
 
-            # currently using _compute instead of compute
-            # see this issue for more info: https://github.com/huggingface/evaluate/pull/328#issuecomment-1286866576
-            metrics = metric._compute(
-                    predictions=predicted.cpu(),
-                    references=masks.cpu(),
-                    num_labels=num_classes,
-                    ignore_index=255,
-                    reduce_labels=False, # we've already reduced the labels ourselves
-                )
+                print("Loss:", loss.item())
+                print("Mean_iou:", metrics["mean_iou"])
+                print("Mean accuracy:", metrics["mean_accuracy"])
 
-            print("Loss:", loss.item())
-            print("Mean_iou:", metrics["mean_iou"])
-            print("Mean accuracy:", metrics["mean_accuracy"])
+                validate(model, val_dataloader, best_scores, epoch + 1, device, architecture)
 
-            validate(model, val_dataloader, best_scores, epoch + 1, device, model_name)
-    print(best_scores)
+
+                if epoch - max(best_scores['iou']['epoch'], best_scores['accuracy']['epoch']) >= patience:  # Reduce LR if no improvement for 'patience' epochs
+                    for param_group in optimizer.param_groups:
+                        param_group['lr'] *= lr_factor
+                    print(f"Reducing LR to {optimizer.param_groups[0]['lr']:.6f}")
+
+        print("______________________________________________________")
+        print("____________________FINAL SCORE_______________________")
+        print("______________________________________________________")
+        print(architecture, encoder, best_scores)
+        print("______________________________________________________")
+        print("______________________________________________________")
+        print("______________________________________________________")
