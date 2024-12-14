@@ -40,6 +40,8 @@ class SegmentationDataset(Dataset):
         unique_classes = torch.unique(mask)
         class_labels = torch.zeros(22, dtype=torch.long)
         class_labels[unique_classes] = 1
+        
+        mask = F.interpolate(mask.unsqueeze(0).unsqueeze(0).float(), size=(128, 128), mode='nearest').squeeze(0).squeeze(0).long()
 
         if self.one_hot:
             mask = F.one_hot(mask.long(), num_classes=22)

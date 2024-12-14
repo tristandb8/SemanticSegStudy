@@ -21,7 +21,7 @@ class CustomModel(nn.Module):
         elif self.decoder_architecture == 'Unet':
             self._setup_Unet_decoder()
         else:
-            assert False
+            assert False, f"decoder is {self.decoder_architecture}"
 
         # Final classification layer
         self.final_conv = nn.Conv2d(self.decoder_final_channels, num_classes, kernel_size=1)
