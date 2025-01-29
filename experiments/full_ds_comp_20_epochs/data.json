@@ -1,0 +1,146 @@
+{
+    "resnet34": {
+        "FPN": {
+            "iou": {
+                "epoch": 19,
+                "score": 0.28169447521409147
+            },
+            "accuracy": {
+                "epoch": 7,
+                "score": 0.4315990035079958
+            }
+        },
+        "Unet": {
+            "iou": {
+                "epoch": 8,
+                "score": 0.26729037696820146
+            },
+            "accuracy": {
+                "epoch": 8,
+                "score": 0.3938185524995105
+            }
+        }
+    },
+    "mobilenetv3_large_100": {
+        "FPN": {
+            "iou": {
+                "epoch": 5,
+                "score": 0.279477630555391
+            },
+            "accuracy": {
+                "epoch": 9,
+                "score": 0.4397573482805739
+            }
+        },
+        "Unet": {
+            "iou": {
+                "epoch": 10,
+                "score": 0.24540768873312507
+            },
+            "accuracy": {
+                "epoch": 10,
+                "score": 0.36854010739947507
+            }
+        }
+    },
+    "mobilenetv4_conv_small.e2400_r224_in1k": {
+        "FPN": {
+            "iou": {
+                "epoch": 4,
+                "score": 0.2977953803570816
+            },
+            "accuracy": {
+                "epoch": 4,
+                "score": 0.4110977796017565
+            }
+        },
+        "Unet": {
+            "iou": {
+                "epoch": 7,
+                "score": 0.2593817736780649
+            },
+            "accuracy": {
+                "epoch": 7,
+                "score": 0.358033287600111
+            }
+        }
+    },
+    "mobilenetv4_hybrid_medium.ix_e550_r384_in1k": {
+        "FPN": {
+            "iou": {
+                "epoch": 7,
+                "score": 0.36029304835781406
+            },
+            "accuracy": {
+                "epoch": 2,
+                "score": 0.4947588999274126
+            }
+        },
+        "Unet": {
+            "iou": {
+                "epoch": 4,
+                "score": 0.3141638521653725
+            },
+            "accuracy": {
+                "epoch": 20,
+                "score": 0.4660844044479232
+            }
+        }
+    },
+    "efficientnet_b0": {
+        "FPN": {
+            "iou": {
+                "epoch": 19,
+                "score": 0.26629029442904256
+            },
+            "accuracy": {
+                "epoch": 2,
+                "score": 0.4548646180815833
+            }
+        },
+        "Unet": {
+            "iou": {
+                "epoch": 9,
+                "score": 0.2724205723781553
+            },
+            "accuracy": {
+                "epoch": 2,
+                "score": 0.375474622250511
+            }
+        }
+    },
+    "rexnetr_200.sw_in12k_ft_in1k": {
+        "FPN": {
+            "iou": {
+                "epoch": 15,
+                "score": 0.3088775822969323
+            },
+            "accuracy": {
+                "epoch": 15,
+                "score": 0.45354425664405884
+            }
+        },
+        "Unet": {
+            "iou": {
+                "epoch": 6,
+                "score": 0.32264778313165915
+            },
+            "accuracy": {
+                "epoch": 6,
+                "score": 0.4632024522593866
+            }
+        }
+    },
+    "mit-b0": {
+        "segformer": {
+            "iou": {
+                "epoch": 7,
+                "score": 0.3097151910340912
+            },
+            "accuracy": {
+                "epoch": 7,
+                "score": 0.45648302092624016
+            }
+        }
+    }
+}

@@ -11,13 +11,13 @@ import torchvision.transforms.functional as TF
 import torch.nn.functional as F
 import numpy as np
 
+
 class SegmentationDataset(Dataset):
-    def __init__(self, image_dir, mask_dir, one_hot, transform=None, augment=False):
+    def __init__(self, image_dir, mask_dir, preprocessor=None, augment=False):
         self.image_dir = image_dir
         self.mask_dir = mask_dir
-        self.transform = transform
+        self.preprocessor = preprocessor
         self.augment = augment
-        self.one_hot = one_hot
         self.images = os.listdir(image_dir)
 
     def __len__(self):
@@ -33,21 +33,13 @@ class SegmentationDataset(Dataset):
         if self.augment:
             image, mask = self.apply_augmentation(image, mask)
 
-        if self.transform:
-            image = self.transform(image)
+        if self.preprocessor:
+            image = self.preprocessor(image)
             mask = torch.from_numpy(np.array(mask)).long()
-        # Create class_labels
-        unique_classes = torch.unique(mask)
-        class_labels = torch.zeros(22, dtype=torch.long)
-        class_labels[unique_classes] = 1
         
         mask = F.interpolate(mask.unsqueeze(0).unsqueeze(0).float(), size=(128, 128), mode='nearest').squeeze(0).squeeze(0).long()
 
-        if self.one_hot:
-            mask = F.one_hot(mask.long(), num_classes=22)
-            mask = mask.permute(2, 0, 1).float()
-
-        return image, mask, class_labels, img_path
+        return image, mask
 
     def apply_augmentation(self, image, mask):
         # Random horizontal flipping

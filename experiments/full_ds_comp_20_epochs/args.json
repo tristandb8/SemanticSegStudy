@@ -1,0 +1,12 @@
+{
+    "base_folder": "BCSS_512",
+    "exp_name": "full_ds_comp",
+    "num_epochs": 20,
+    "bs": 16,
+    "patience": 8,
+    "lr_factor": 0.3,
+    "starting_lr": 1e-4,
+    "num_classes": 22,
+    "one_hot_masks": false
+    
+}
